@@ -332,15 +332,15 @@ void BlobFileSet::GetObsoleteFiles(std::vector<std::string>* obsolete_files,
 void BlobFileSet::GetAllFiles(std::vector<std::string>* files, uint64_t* manifest_file_size) {
   for (auto it = column_families_.begin(); it != column_families_.end(); ++it) {
     auto& blob_storage = it->second;
-      // get live blob file
+    // Get live blob file
     blob_storage->GetAllFiles(files);
   }
-  // append current MANIFEST and CURRENT file name
+  // Append current MANIFEST and CURRENT file name
   std::string file_name = DescriptorFileName("/titandb", manifest_file_number_);
   files->push_back(file_name);
   files->push_back(CurrentFileName("/titandb"));
 
-  // find current length of titandb manifest file while holding the mutex lock
+  // Find current length of titandb manifest file while holding the mutex lock
   *manifest_file_size = manifest_->file()->GetFileSize();
 }
 

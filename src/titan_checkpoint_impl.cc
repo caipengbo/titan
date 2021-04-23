@@ -23,7 +23,7 @@ Status Checkpoint::CreateCheckpoint(const std::string& /*checkpoint_dir*/,
 
 void TitanCheckpointImpl::CleanStagingDirectory(
     const std::string& full_private_path, Logger* info_log) {
-    std::vector<std::string> subchildren;
+  std::vector<std::string> subchildren;
   Status s = db_->GetEnv()->FileExists(full_private_path);
   if (s.IsNotFound()) {
     return;
@@ -42,15 +42,13 @@ void TitanCheckpointImpl::CleanStagingDirectory(
         ROCKS_LOG_INFO(info_log, "Delete file %s -- %s", subchild_path.c_str(),
                        s.ToString().c_str());
       }
-
     }
   }
-  // finally delete the private dir
+  // Finally delete the private dir
   s = db_->GetEnv()->DeleteDir(full_private_path);
   ROCKS_LOG_INFO(info_log, "Delete dir %s -- %s",
                  full_private_path.c_str(), s.ToString().c_str());
 }
-
 
 // Builds an openable checkpoint of TitanDB
 Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
@@ -85,14 +83,14 @@ Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
           "Checkpoint process -- using temporary directory %s",
           full_private_path.c_str());
   CleanStagingDirectory(full_private_path, db_options.info_log.get());
-  // create checkpoint directory and subdirectory
+  // Create checkpoint directory and subdirectory
   s = db_->GetEnv()->CreateDir(full_private_path);
   if (s.ok()) {
     s = db_->GetEnv()->CreateDir(full_private_path + "/titandb");
   }
   uint64_t sequence_number = 0;
   if (s.ok()) {
-    // disable file deletions
+    // Disable file deletions
     s = db_->DisableFileDeletions();
     const bool disabled_file_deletions = s.ok();
     if (s.ok()) {
@@ -120,7 +118,7 @@ Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
     }
 
     if (disabled_file_deletions) {
-      // we copied all the files, enable file deletions
+      // We copied all the files, enable file deletions
       Status ss = db_->EnableFileDeletions(false);
       assert(ss.ok());
     }
@@ -128,7 +126,7 @@ Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
   }
 
   if (s.ok()) {
-    // move tmp private backup to real checkpoint directory
+    // Move tmp private backup to real checkpoint directory
     s = db_->GetEnv()->RenameFile(full_private_path, checkpoint_dir);
   }
   if (s.ok()) {
@@ -140,12 +138,12 @@ Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
   }
 
   if (s.ok()) {
-    // here we know that we succeeded and installed the new checkpoint
+    // Here we know that we succeeded and installed the new checkpoint
     ROCKS_LOG_INFO(db_options.info_log, "Checkpoint DONE. All is good");
     ROCKS_LOG_INFO(db_options.info_log, "Checkpoint sequence number: %" PRIu64,
                    sequence_number);
   } else {
-    // clean all the files we might have created
+    // Clean all the files we might have created
     ROCKS_LOG_INFO(db_options.info_log, "Checkpoint failed -- %s",
                    s.ToString().c_str());
     CleanStagingDirectory(full_private_path, db_options.info_log.get());
@@ -177,71 +175,70 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
   VectorLogPtr live_wal_files;
 
   bool flush_memtable = true;
-  if (s.ok()) {
-    if (!db_options.allow_2pc) {
-      if (log_size_for_flush == port::kMaxUint64) {
+  if (!db_options.allow_2pc) {
+    if (log_size_for_flush == port::kMaxUint64) {
+      flush_memtable = false;
+    } else if (log_size_for_flush > 0) {
+      // if out standing log files are small, we skip the flush.
+      s = db_->GetSortedWalFiles(live_wal_files);
+
+      if (!s.ok()) {
+        return s;
+      }
+
+      // Don't flush column families if total log size is smaller than
+      // log_size_for_flush. We copy the log files instead.
+      // We may be able to cover 2PC case too.
+      uint64_t total_wal_size = 0;
+      for (auto& wal : live_wal_files) {
+        total_wal_size += wal->SizeFileBytes();
+      }
+      if (total_wal_size < log_size_for_flush) {
         flush_memtable = false;
-      } else if (log_size_for_flush > 0) {
-        // if out standing log files are small, we skip the flush.
-        s = db_->GetSortedWalFiles(live_wal_files);
-
-        if (!s.ok()) {
-          return s;
-        }
-
-        // Don't flush column families if total log size is smaller than
-        // log_size_for_flush. We copy the log files instead.
-        // We may be able to cover 2PC case too.
-        uint64_t total_wal_size = 0;
-        for (auto& wal : live_wal_files) {
-          total_wal_size += wal->SizeFileBytes();
-        }
-        if (total_wal_size < log_size_for_flush) {
-          flush_memtable = false;
-        }
-        live_wal_files.clear();
       }
+      live_wal_files.clear();
     }
-
-    // this will return live files prefixed with "/"
-    s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
-                               titan_live_files, &titan_manifest_file_size,
-                               flush_memtable);
-    
-    if (s.ok() && db_options.allow_2pc) {
-      // If 2PC is enabled, we need to get minimum log number after the flush.
-      // Need to refetch the live files to recapture the checkpoint.
-      if (!db_->GetIntProperty(DB::Properties::kMinLogNumberToKeep,
-                               &min_log_num)) {
-        return Status::InvalidArgument(
-                "2PC enabled but cannot fine the min log number to keep.");
-      }
-      // GetTitanLiveFiles() calls the rocksdb::DB::GetLiveFiles() internally.
-      // We need to refetch live files with flush to handle this case:
-      // A previous 000001.log contains the prepare record of transaction tnx1.
-      // The current log file is 000002.log, and sequence_number points to this
-      // file.
-      // After calling rocksdb::DB::GetLiveFiles(), 000003.log is created.
-      // Then tnx1 is committed. The commit record is written to 000003.log.
-      // Now we fetch min_log_num, which will be 3.
-      // Then only 000002.log and 000003.log will be copied, and 000001.log will
-      // be skipped. 000003.log contains commit message of tnx1, but we don't
-      // have respective prepare record for it.
-      // In order to avoid this situation, we need to force flush to make sure
-      // all transactions committed before getting min_log_num will be flushed
-      // to SST files.
-      // We cannot get min_log_num before calling the rocksdb::DB::GetLiveFiles()
-      // for the first time, because if we do that, all the logs files will be
-      // included, far more than needed.
-      s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
-                                 titan_live_files, &titan_manifest_file_size,
-                                 flush_memtable);
-    }
-
-    TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles1");
-    TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles2");
-    db_->FlushWAL(false /* sync */);
   }
+
+  // This will return live files prefixed with "/"
+  s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
+                              titan_live_files, &titan_manifest_file_size,
+                              flush_memtable);
+  
+  if (s.ok() && db_options.allow_2pc) {
+    // If 2PC is enabled, we need to get minimum log number after the flush.
+    // Need to refetch the live files to recapture the checkpoint.
+    if (!db_->GetIntProperty(DB::Properties::kMinLogNumberToKeep,
+                              &min_log_num)) {
+      return Status::InvalidArgument(
+              "2PC enabled but cannot fine the min log number to keep.");
+    }
+    // GetTitanLiveFiles() calls the rocksdb::DB::GetLiveFiles() internally.
+    // We need to refetch live files with flush to handle this case:
+    // A previous 000001.log contains the prepare record of transaction tnx1.
+    // The current log file is 000002.log, and sequence_number points to this
+    // file.
+    // After calling rocksdb::DB::GetLiveFiles(), 000003.log is created.
+    // Then tnx1 is committed. The commit record is written to 000003.log.
+    // Now we fetch min_log_num, which will be 3.
+    // Then only 000002.log and 000003.log will be copied, and 000001.log will
+    // be skipped. 000003.log contains commit message of tnx1, but we don't
+    // have respective prepare record for it.
+    // In order to avoid this situation, we need to force flush to make sure
+    // all transactions committed before getting min_log_num will be flushed
+    // to SST files.
+    // We cannot get min_log_num before calling the rocksdb::DB::GetLiveFiles()
+    // for the first time, because if we do that, all the logs files will be
+    // included, far more than needed.
+    s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
+                                titan_live_files, &titan_manifest_file_size,
+                                flush_memtable);
+  }
+
+  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles1");
+  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles2");
+  db_->FlushWAL(false /* sync */);
+  
   // if we have more than one column family, we need to also get WAL files
   if (s.ok()) {
     s = db_->GetSortedWalFiles(live_wal_files);
@@ -296,9 +293,9 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
     }
     std::string src_fname = live_files[i];
 
-    // rules:
-    // * if it's kTableFile/kBlobFile, then it's shared
-    // * if it's kDescriptorFile, limit the size to manifest_file_size
+    // Rules:
+    // * If it's kTableFile/kBlobFile, then it's shared
+    // * If it's kDescriptorFile, limit the size to manifest_file_size
     // * always copy if cross-device link
     if ((type == kTableFile || type == kBlobFile) && same_fs) {
       s = link_file_cb(db_->GetName(), src_fname, type);
