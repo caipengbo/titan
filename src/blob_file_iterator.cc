@@ -17,11 +17,13 @@ BlobFileIterator::BlobFileIterator(
 
 BlobFileIterator::~BlobFileIterator() {}
 
+// 把Header和Footer都读出来，并且记录一些关键的offset:header_size_
 bool BlobFileIterator::Init() {
   Slice slice;
   char header_buf[BlobFileHeader::kMaxEncodedLength];
   // With for_compaction=true, rate_limiter is enabled. Since BlobFileIterator
   // is only used for GC, we always set for_compaction to true.
+  // 读头部
   status_ = file_->Read(0, BlobFileHeader::kMaxEncodedLength, &slice,
                         header_buf, true /*for_compaction*/);
   if (!status_.ok()) {
@@ -38,6 +40,7 @@ bool BlobFileIterator::Init() {
   char footer_buf[BlobFileFooter::kEncodedLength];
   // With for_compaction=true, rate_limiter is enabled. Since BlobFileIterator
   // is only used for GC, we always set for_compaction to true.
+  // 读尾部
   status_ = file_->Read(file_size_ - BlobFileFooter::kEncodedLength,
                         BlobFileFooter::kEncodedLength, &slice, footer_buf,
                         true /*for_compaction*/);
@@ -45,6 +48,8 @@ bool BlobFileIterator::Init() {
   BlobFileFooter blob_file_footer;
   status_ = blob_file_footer.DecodeFrom(&slice);
   end_of_blob_record_ = file_size_ - BlobFileFooter::kEncodedLength;
+
+  // meta_index_handle
   if (!blob_file_footer.meta_index_handle.IsNull()) {
     end_of_blob_record_ -=
         (blob_file_footer.meta_index_handle.size() + kBlockTrailerSize);
@@ -72,6 +77,7 @@ bool BlobFileIterator::Init() {
   return true;
 }
 
+// 将iterate_offset_重置到header_size_（头部）
 void BlobFileIterator::SeekToFirst() {
   if (!init_ && !Init()) return;
   status_ = Status::OK();

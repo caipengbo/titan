@@ -180,7 +180,7 @@ void BlobStorage::GetObsoleteFiles(std::vector<std::string>* obsolete_files,
             BlobFileName(db_options_.dirname, file_number));
       }
 
-      it = obsolete_files_.erase(it);
+      it = obsolete_files_.erase(it);  // 注意此处更新it了
       continue;
     }
     ++it;

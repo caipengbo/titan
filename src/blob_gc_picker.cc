@@ -9,6 +9,7 @@
 namespace rocksdb {
 namespace titandb {
 
+// GC策略
 BasicBlobGCPicker::BasicBlobGCPicker(TitanDBOptions db_options,
                                      TitanCFOptions cf_options,
                                      TitanStats* stats)

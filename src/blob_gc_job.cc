@@ -266,7 +266,7 @@ Status BlobGCJob::DoRunGC() {
 
   return s;
 }
-
+// 将要写入的Key和new_index插入 rewrite_batches_
 void BlobGCJob::BatchWriteNewIndices(BlobFileBuilder::OutContexts& contexts,
                                      Status* s) {
   auto* cfh = blob_gc_->column_family_handle();
@@ -334,13 +334,14 @@ Status BlobGCJob::BuildIterator(
 
   return s;
 }
-
+// Blob文件里面有blob_index，对应的是key，去检查LSM里面有没有Key
 Status BlobGCJob::DiscardEntry(const Slice& key, const BlobIndex& blob_index,
                                bool* discardable) {
   TitanStopWatch sw(env_, metrics_.gc_read_lsm_micros);
   assert(discardable != nullptr);
   PinnableSlice index_entry;
   bool is_blob_index = false;
+  // 去LSM中查当前key是否包含在LSM中！
   Status s = base_db_impl_->GetImpl(
       ReadOptions(), blob_gc_->column_family_handle(), key, &index_entry,
       nullptr /*value_found*/, nullptr /*read_callback*/, &is_blob_index);
@@ -349,13 +350,14 @@ Status BlobGCJob::DiscardEntry(const Slice& key, const BlobIndex& blob_index,
   }
   // count read bytes for checking LSM entry
   metrics_.gc_bytes_read += key.size() + index_entry.size();
+  // 没有找到，当前Entry可以丢弃
   if (s.IsNotFound() || !is_blob_index) {
     // Either the key is deleted or updated with a newer version which is
     // inlined in LSM.
     *discardable = true;
     return Status::OK();
   }
-
+  // 找到key了，检查对应的Value是不是该blob_index
   BlobIndex other_blob_index;
   s = other_blob_index.DecodeFrom(&index_entry);
   if (!s.ok()) {
@@ -471,7 +473,7 @@ Status BlobGCJob::InstallOutputBlobFiles() {
 
   return s;
 }
-
+// 将rewrite_batches_中的内容插入到LSM中（调用base db Write）
 Status BlobGCJob::RewriteValidKeyToLSM() {
   TitanStopWatch sw(env_, metrics_.gc_update_lsm_micros);
   Status s;

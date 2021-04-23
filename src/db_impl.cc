@@ -153,6 +153,7 @@ TitanDBImpl::TitanDBImpl(const TitanDBOptions& options,
 
 TitanDBImpl::~TitanDBImpl() { Close(); }
 
+// 后端
 void TitanDBImpl::StartBackgroundTasks() {
   if (thread_purge_obsolete_ == nullptr &&
       db_options_.purge_obsolete_files_period_sec > 0) {

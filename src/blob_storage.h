@@ -176,6 +176,7 @@ class BlobStorage {
 
   std::shared_ptr<BlobFileCache> file_cache_;
 
+  // list (file_number-score)
   std::vector<GCScore> gc_score_;
 
   std::list<std::pair<uint64_t, SequenceNumber>> obsolete_files_;

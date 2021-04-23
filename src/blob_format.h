@@ -148,7 +148,7 @@ struct BlobHandle {
   friend bool operator==(const BlobHandle& lhs, const BlobHandle& rhs);
 };
 
-// Format of blob index (not fixed size):
+// Format of blob index (not fixed size): 哪个文件的哪个位置（偏移+大小）
 //
 //    +------+-------------+------------------------------------+
 //    | type | file number |            blob handle             |
