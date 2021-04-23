@@ -141,6 +141,9 @@ class TitanDBImpl : public TitanDB {
   bool GetIntProperty(ColumnFamilyHandle* column_family, const Slice& property,
                       uint64_t* value) override;
 
+  using TitanDB::GetTotalBlobSize;
+  uint64_t GetTotalBlobSize() const override;
+
   bool initialized() const { return initialized_; }
 
   void OnFlushCompleted(const FlushJobInfo& flush_job_info);

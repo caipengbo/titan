@@ -1017,6 +1017,41 @@ TEST_F(TitanDBTest, SetOptions) {
   ASSERT_EQ(15, titan_db_options.max_background_jobs);
 }
 
+TEST_F(TitanDBTest, GetTotalBlobSize) {
+  options_.disable_background_gc = false;
+  Open();
+  for (uint64_t k = 1; k <= 100; k++) {
+    Put(k);
+  }
+  Flush();
+  uint64_t value, total_blob_file_size = 0;
+  ASSERT_TRUE(GetIntProperty(TitanDB::Properties::kObsoleteBlobFileSize, &value));
+  total_blob_file_size += value;
+  ASSERT_TRUE(GetIntProperty(TitanDB::Properties::kLiveBlobFileSize, &value));
+  total_blob_file_size += value;
+  ASSERT_EQ(db_->GetTotalBlobSize(), total_blob_file_size);
+
+  Reopen();
+  total_blob_file_size = 0;
+  ASSERT_TRUE(GetIntProperty(TitanDB::Properties::kObsoleteBlobFileSize, &value));
+  total_blob_file_size += value;
+  ASSERT_TRUE(GetIntProperty(TitanDB::Properties::kLiveBlobFileSize, &value));
+  total_blob_file_size += value;
+  ASSERT_EQ(db_->GetTotalBlobSize(), total_blob_file_size);
+
+  for (uint64_t k = 1; k <= 100; k++) {
+    if (k % 3 == 0) Delete(k);
+  }
+  Flush();
+  CompactAll();
+  total_blob_file_size = 0;
+  ASSERT_TRUE(GetIntProperty(TitanDB::Properties::kObsoleteBlobFileSize, &value));
+  total_blob_file_size += value;
+  ASSERT_TRUE(GetIntProperty(TitanDB::Properties::kLiveBlobFileSize, &value));
+  total_blob_file_size += value;
+  ASSERT_EQ(db_->GetTotalBlobSize(), total_blob_file_size);
+}
+
 TEST_F(TitanDBTest, BlobRunModeBasic) {
   options_.disable_background_gc = true;
   options_.disable_auto_compactions = true;

@@ -87,6 +87,9 @@ class BlobFileSet {
     return obsolete_columns_.count(cf_id) > 0;
   }
 
+  // REQUIRES: mutex is held
+  uint64_t GetTotalBlobSize() const;
+
  private:
   friend class BlobFileSizeCollectorTest;
   friend class VersionTest;
