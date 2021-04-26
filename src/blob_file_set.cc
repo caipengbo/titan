@@ -3,7 +3,6 @@
 #include <inttypes.h>
 
 #include "edit_collector.h"
-
 namespace rocksdb {
 namespace titandb {
 
@@ -326,13 +325,13 @@ void BlobFileSet::GetObsoleteFiles(std::vector<std::string>* obsolete_files,
   obsolete_manifests_.clear();
 }
 
-uint64_t BlobFileSet::GetTotalBlobSize() const {
+uint64_t BlobFileSet::GetLiveBlobSize() const {
   uint64_t total_size = 0;
   for (auto it = column_families_.begin(); it != column_families_.end(); ++it) {
     auto& cf_id = it->first;
     if (obsolete_columns_.find(cf_id) == obsolete_columns_.end()) {
       auto& blob_storage = it->second;
-      total_size += blob_storage->GetTotalBlobSize();
+      total_size += blob_storage->GetLiveBlobSize();
     }
   }
   return total_size;

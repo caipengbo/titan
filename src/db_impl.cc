@@ -1114,9 +1114,9 @@ bool TitanDBImpl::GetIntProperty(ColumnFamilyHandle* column_family,
   }
 }
 
-uint64_t TitanDBImpl::GetTotalBlobSize() const {
+uint64_t TitanDBImpl::GetLiveBlobSize() const {
   MutexLock l(&mutex_);
-  return blob_file_set_->GetTotalBlobSize();
+  return blob_file_set_->GetLiveBlobSize();
 }
 
 void TitanDBImpl::OnFlushCompleted(const FlushJobInfo& flush_job_info) {

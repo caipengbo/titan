@@ -141,8 +141,8 @@ class TitanDBImpl : public TitanDB {
   bool GetIntProperty(ColumnFamilyHandle* column_family, const Slice& property,
                       uint64_t* value) override;
 
-  using TitanDB::GetTotalBlobSize;
-  uint64_t GetTotalBlobSize() const override;
+  using TitanDB::GetLiveBlobSize;
+  uint64_t GetLiveBlobSize() const override;
 
   bool initialized() const { return initialized_; }
 

@@ -88,7 +88,7 @@ class BlobFileSet {
   }
 
   // REQUIRES: mutex is held
-  uint64_t GetTotalBlobSize() const;
+  uint64_t GetLiveBlobSize() const;
 
  private:
   friend class BlobFileSizeCollectorTest;
