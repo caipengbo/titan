@@ -149,6 +149,25 @@ class TitanDBTest : public testing::Test {
     return db_->GetIntProperty(property, value);
   }
 
+  bool GetAllCFIntProperty(const Slice& property, uint64_t* value) {
+    uint64_t sum = 0;
+    // Default column family
+    bool success = db_->GetIntProperty(property, value);
+    if (!success) {
+      return false;
+    }
+    sum += *value;
+    for (auto& handle : cf_handles_) {
+      success = db_->GetIntProperty(handle, property, value);
+      if (!success) {
+        return false;
+      }
+      sum += *value;
+    }
+    *value = sum;
+    return true;
+  }
+
   std::weak_ptr<BlobStorage> GetBlobStorage(
       ColumnFamilyHandle* cf_handle = nullptr) {
     if (cf_handle == nullptr) {
@@ -1015,6 +1034,34 @@ TEST_F(TitanDBTest, SetOptions) {
   ASSERT_EQ(15, titan_options.max_background_jobs);
   TitanDBOptions titan_db_options = db_->GetTitanDBOptions();
   ASSERT_EQ(15, titan_db_options.max_background_jobs);
+}
+
+TEST_F(TitanDBTest, GetLiveBlobSize) {
+  options_.disable_background_gc = false;
+  Open();
+  AddCF("CF1");
+  AddCF("CF2");
+  for (uint64_t k = 1; k <= 100; k++) {
+    Put(k);
+  }
+  ASSERT_EQ(db_->GetLiveBlobSize(), 0);
+  Flush();
+
+  uint64_t live_blob_file_size;
+  ASSERT_TRUE(GetAllCFIntProperty(TitanDB::Properties::kLiveBlobFileSize, &live_blob_file_size));
+  ASSERT_EQ(db_->GetLiveBlobSize(), live_blob_file_size);
+  
+  for (uint64_t k = 1; k <= 100; k++) {
+    if (k % 3 == 0) Delete(k);
+  }
+  Flush();
+  CompactAll();
+  ASSERT_TRUE(GetAllCFIntProperty(TitanDB::Properties::kLiveBlobFileSize, &live_blob_file_size));
+  ASSERT_EQ(db_->GetLiveBlobSize(), live_blob_file_size);
+  
+  DropCF("CF1");
+  ASSERT_TRUE(GetAllCFIntProperty(TitanDB::Properties::kLiveBlobFileSize, &live_blob_file_size));
+  ASSERT_EQ(db_->GetLiveBlobSize(), live_blob_file_size);
 }
 
 TEST_F(TitanDBTest, BlobRunModeBasic) {

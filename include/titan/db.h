@@ -148,6 +148,9 @@ class TitanDB : public StackableDB {
 
   virtual TitanDBOptions GetTitanDBOptions() const = 0;
 
+  // Return the size of all live blob files.
+  virtual uint64_t GetLiveBlobSize() const = 0;
+
   struct Properties {
     // "rocksdb.titandb.num-blob-files-at-level<N>" - returns string containing
     //      the number of blob files at level <N>, where <N> is an ASCII

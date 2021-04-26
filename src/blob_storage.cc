@@ -91,6 +91,7 @@ void BlobStorage::AddBlobFile(std::shared_ptr<BlobFileMeta>& file) {
   files_.emplace(std::make_pair(file->file_number(), file));
   blob_ranges_.emplace(std::make_pair(Slice(file->smallest_key()), file));
   levels_file_count_[file->file_level()]++;
+  live_blob_size_ += file->file_size();
   if (file->live_data_size() != 0) {
     // When live data size == 0, it means the live size of blob file is unknown
     // now.
@@ -123,6 +124,7 @@ void BlobStorage::MarkFileObsoleteLocked(std::shared_ptr<BlobFileMeta> file,
       std::make_pair(file->file_number(), obsolete_sequence));
   file->FileStateTransit(BlobFileMeta::FileEvent::kDelete);
   levels_file_count_[file->file_level()]--;
+  live_blob_size_ -= file->file_size();
   SubStats(stats_, cf_id_, file->GetDiscardableRatioLevel(), 1);
   SubStats(stats_, cf_id_, TitanInternalStats::LIVE_BLOB_SIZE,
            file->live_data_size());

@@ -19,6 +19,7 @@ class BlobStorage {
   BlobStorage(const BlobStorage& bs) : destroyed_(false) {
     this->files_ = bs.files_;
     this->file_cache_ = bs.file_cache_;
+    this->live_blob_size_ = bs.live_blob_size_;
     this->db_options_ = bs.db_options_;
     this->cf_options_ = bs.cf_options_;
     this->cf_id_ = bs.cf_id_;
@@ -32,6 +33,7 @@ class BlobStorage {
         cf_options_(_cf_options),
         cf_id_(cf_id),
         levels_file_count_(_cf_options.num_levels, 0),
+        live_blob_size_(0),
         blob_ranges_(InternalComparator(_cf_options.comparator)),
         file_cache_(_file_cache),
         destroyed_(false),
@@ -122,6 +124,11 @@ class BlobStorage {
     return levels_file_count_[level];
   }
 
+  uint64_t GetLiveBlobSize() const {
+    MutexLock l(&mutex_);
+    return live_blob_size_;
+  }
+
   // Returns the number of obsolete blob files.
   // TODO: use this method to calculate `kNumObsoleteBlobFile` DB property.
   std::size_t NumObsoleteBlobFiles() const {
@@ -154,6 +161,7 @@ class BlobStorage {
   // file_number -> file_meta
   std::unordered_map<uint64_t, std::shared_ptr<BlobFileMeta>> files_;
   std::vector<int> levels_file_count_;
+  uint64_t live_blob_size_;
 
   class InternalComparator {
    public:
