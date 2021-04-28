@@ -4,11 +4,14 @@
 #include "rocksdb/cache.h"
 #include "util/compression.h"
 #include "util/file_reader_writer.h"
+#include "db/log_writer.h"
 
 #include "titan_stats.h"
 
 namespace rocksdb {
 namespace titandb {
+
+class VersionEdit;
 
 // A slice pointed to an owned buffer.
 class OwnedSlice : public Slice {
@@ -78,6 +81,11 @@ void DeleteCacheValue(const Slice&, void* value) {
 Status SyncTitanManifest(Env* env, TitanStats* stats,
                          const ImmutableDBOptions* db_options,
                          WritableFileWriter* file);
+
+// Create titan manifest file based on the content of VersionEdit
+Status CreateTitanManifest(Env* env, bool use_fsync,
+                         const std::string& file_name,
+                         std::vector<VersionEdit>* edits);
 
 }  // namespace titandb
 }  // namespace rocksdb

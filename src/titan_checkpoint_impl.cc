@@ -1,5 +1,6 @@
 #include "titan_checkpoint_impl.h"
-
+#include "util.h"
+#include "version_edit.h"
 
 #include <cinttypes>
 #include "file/file_util.h"
@@ -114,7 +115,7 @@ Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
                 return CreateFile(db_->GetEnv(), full_private_path + fname, contents,
                                   db_options.use_fsync);
               } /* create_file_cb */,
-              &sequence_number, log_size_for_flush);
+              &sequence_number, log_size_for_flush, full_private_path);
     }
 
     if (disabled_file_deletions) {
@@ -163,12 +164,13 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
         std::function<Status(const std::string& fname, const std::string& contents,
                              FileType type)>
         create_file_cb,
-        uint64_t* sequence_number, uint64_t log_size_for_flush) {
+        uint64_t* sequence_number, uint64_t log_size_for_flush,
+        const std::string full_private_path) {
   Status s;
   std::vector<std::string> live_files;
   std::vector<std::string> titan_live_files;
+  std::vector<VersionEdit> version_edits;
   uint64_t base_manifest_file_size = 0;
-  uint64_t titan_manifest_file_size = 0;
   uint64_t min_log_num = port::kMaxUint64;
   *sequence_number = db_->GetLatestSequenceNumber();
   bool same_fs = true;
@@ -202,8 +204,7 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
 
   // This will return live files prefixed with "/"
   s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
-                              titan_live_files, &titan_manifest_file_size,
-                              flush_memtable);
+                              &version_edits, flush_memtable);
   
   if (s.ok() && db_options.allow_2pc) {
     // If 2PC is enabled, we need to get minimum log number after the flush.
@@ -231,8 +232,7 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
     // for the first time, because if we do that, all the logs files will be
     // included, far more than needed.
     s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
-                                titan_live_files, &titan_manifest_file_size,
-                                flush_memtable);
+                              &version_edits, flush_memtable);
   }
 
   TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles1");
@@ -248,8 +248,6 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
   }
 
   size_t wal_size = live_wal_files.size();
-
-  live_files.insert(live_files.end(), titan_live_files.begin(), titan_live_files.end());
 
   // copy/hard link live_files
   std::string base_manifest_fname, base_current_fname;
@@ -295,8 +293,9 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
 
     // Rules:
     // * If it's kTableFile/kBlobFile, then it's shared
-    // * If it's kDescriptorFile, limit the size to manifest_file_size
-    // * always copy if cross-device link
+    // * If it's kDescriptorFile of base db, limit the size to base_manifest_file_size
+    // * If it's kDescriptorFile of titandb, craft the manifest based on all blob file
+    // * Always copy if cross-device link
     if ((type == kTableFile || type == kBlobFile) && same_fs) {
       s = link_file_cb(db_->GetName(), src_fname, type);
       if (s.IsNotSupported()) {
@@ -306,9 +305,13 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
     }
     if ((type != kTableFile && type != kBlobFile) || (!same_fs)) {
       if (type == kDescriptorFile) {
-        s = copy_file_cb(db_->GetName(), src_fname,
-                (in_titan_dir) ? titan_manifest_file_size : base_manifest_file_size,
-                type);  
+        if (in_titan_dir) {
+          // Craft titan manifest file, ensure include all titan file.
+          CreateTitanManifest(db_->GetEnv(), db_->GetDBOptions().use_fsync,
+                             full_private_path+src_fname, &version_edits);
+        } else {
+          s = copy_file_cb(db_->GetName(), src_fname, base_manifest_file_size, type); 
+        }
       } else {
         s = copy_file_cb(db_->GetName(), src_fname, 0, type);        
       }
@@ -321,7 +324,7 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
                    kCurrentFile);
   }
   if (s.ok() && !titan_current_fname.empty() && !titan_manifest_fname.empty()) {
-    create_file_cb(titan_current_fname, titan_manifest_fname.substr(8) + "\n",
+    create_file_cb(titan_current_fname, titan_manifest_fname.substr(9) + "\n",
                    kCurrentFile);
   }
 

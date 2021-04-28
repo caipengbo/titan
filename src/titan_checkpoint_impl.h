@@ -38,7 +38,8 @@ class TitanCheckpointImpl : public Checkpoint {
           std::function<Status(const std::string& fname,
                                const std::string& contents, FileType type)>
           create_file_cb,
-          uint64_t* sequence_number, uint64_t log_size_for_flush);
+          uint64_t* sequence_number, uint64_t log_size_for_flush,
+          const std::string full_private_path);
 
  private:
   void CleanStagingDirectory(const std::string& path, Logger* info_log);

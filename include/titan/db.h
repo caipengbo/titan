@@ -6,6 +6,8 @@
 namespace rocksdb {
 namespace titandb {
 
+class VersionEdit;
+
 struct TitanCFDescriptor {
   std::string name;
   TitanCFOptions options;
@@ -118,16 +120,17 @@ class TitanDB : public StackableDB {
     return Status::NotSupported("TitanDB doesn't support this operation");
   }
 
-  // Get TitanDB live files base on rocksdb::DB::GetLiveFiles 
+  // Get TitanDB live files based on rocksdb::DB::GetLiveFiles 
   // 
-  // base_ret and base_manifest_file_size are derived from rocksdb::DB::GetLiveFiles
-  // titan_ret is the list of all files in dirname_ directory(including obsolete files)
-  // titan_manifest_file_size is the size of manifest file in dirname_ directory
-  virtual Status GetTitanLiveFiles(std::vector<std::string>& base_ret,
-                              uint64_t* base_manifest_file_size,
-                              std::vector<std::string>& titan_ret,
-                              uint64_t* titan_manifest_file_size,
-                              bool flush_memtable = true) = 0;
+  // files include the live files of base db and all titandb files
+  // base_manifest_file_size are derived from rocksdb::DB::GetLiveFiles
+  // edits include all blob file record of ervery column family
+  virtual Status GetTitanLiveFiles(std::vector<std::string>& /*files*/,
+                              uint64_t* /*base_manifest_file_size*/,
+                              std::vector<VersionEdit>* /*edits*/,
+                              bool /*flush_memtable*/) {
+    return Status::NotSupported("TitanDB doesn't support this operation");
+  }
                               
   using rocksdb::StackableDB::SingleDelete;
   Status SingleDelete(const WriteOptions& /*wopts*/,

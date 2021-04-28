@@ -1,4 +1,5 @@
 #include "util.h"
+#include "version_edit.h"
 
 #include "util/stop_watch.h"
 
@@ -164,6 +165,32 @@ Status SyncTitanManifest(Env* env, TitanStats* stats,
                          WritableFileWriter* file) {
   StopWatch sw(env, statistics(stats), TITAN_MANIFEST_FILE_SYNC_MICROS);
   return file->Sync(db_options->use_fsync);
+}
+
+Status CreateTitanManifest(Env* env, bool use_fsync,
+                         const std::string& file_name,
+                         std::vector<VersionEdit>* edits) {
+  Status s;
+  const EnvOptions env_options;
+  std::unique_ptr<WritableFileWriter> file;
+  
+  {
+    std::unique_ptr<WritableFile> f;
+    s = env->NewWritableFile(file_name, &f, env_options);
+    if (!s.ok()) return s;
+    file.reset(new WritableFileWriter(std::move(f), file_name, env_options));
+  }
+  std::unique_ptr<log::Writer> manifest;
+  manifest.reset(new log::Writer(std::move(file), 0, false));
+  
+  for (auto& edit : *edits) {
+    std::string record;
+    edit.EncodeTo(&record);
+    s = manifest->AddRecord(record);
+    if (!s.ok()) return s;
+  }
+  
+  return manifest->file()->Sync(use_fsync);
 }
 
 }  // namespace titandb

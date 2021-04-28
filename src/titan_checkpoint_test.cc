@@ -84,6 +84,13 @@ class CheckpointTest : public testing::Test {
     }
   }
 
+  void DropColumnFamily(int cf) {
+    auto handle = handles_[cf];
+    ASSERT_OK(db_->DropColumnFamily(handle));
+    ASSERT_OK(db_->DestroyColumnFamilyHandle(handle));
+    handles_.erase(handles_.begin() + cf);
+  }
+
   void CreateAndReopenWithCF(const std::vector<std::string>& cfs,
                              const TitanOptions& options) {
     CreateColumnFamilies(cfs, options);
@@ -384,7 +391,7 @@ TEST_F(CheckpointTest, CheckpointCFNoFlush) {
 
   ASSERT_OK(Put(0, "Default", "Default"));
   ASSERT_OK(Put(1, "one", "one"));
-  Flush();
+  ASSERT_OK(Flush());
   ASSERT_OK(Put(2, "two", "two"));
   std::string large_value_1 = GenLargeValue(options.min_blob_size, '1');
   ASSERT_OK(Put(3, "three", large_value_1));
@@ -496,9 +503,13 @@ TEST_F(CheckpointTest, CheckpointInvalidDirectoryName) {
 
 TEST_F(CheckpointTest, CheckpointWithParallelWrites) {
   ASSERT_OK(Put("key1", "val1"));
-  port::Thread thread([this]() { 
+  port::Thread thread([this]() {
     ASSERT_OK(Put("key2", "val2"));
-    ASSERT_OK(Put("key3", GenLargeValue(CurrentOptions().min_blob_size, 'v')));
+    ASSERT_OK(Put("key3", "val3"));
+    ASSERT_OK(Put("key4", "val4"));
+    ASSERT_OK(Put("key5", GenLargeValue(CurrentOptions().min_blob_size, '5')));
+    ASSERT_OK(Put("key6", GenLargeValue(CurrentOptions().min_blob_size, '6')));
+    ASSERT_OK(Put("key7", GenLargeValue(CurrentOptions().min_blob_size, '7')));
   });
   Checkpoint* checkpoint;
   ASSERT_OK(Checkpoint::Create(db_, &checkpoint));
@@ -535,6 +546,78 @@ TEST_F(CheckpointTest, CheckpointWithUnsyncedDataDropped) {
   delete snapshot_db;
   delete db_;
   db_ = nullptr;
+}
+
+TEST_F(CheckpointTest, GCWhileCheckpointing) {
+  TitanOptions options = CurrentOptions();
+  options.max_background_gc = 1;
+  options.disable_background_gc = true;
+  options.blob_file_discardable_ratio = 0.01;
+  CreateAndReopenWithCF({"one", "two", "three"}, options);
+
+  std::string large_value_1 = GenLargeValue(options.min_blob_size, '1');
+  std::string large_value_2 = GenLargeValue(options.min_blob_size, '2');
+
+  ASSERT_OK(Put(0, "Default", "Default"));
+  ASSERT_OK(Put(1, "one", "one"));
+  ASSERT_OK(Put(2, "two", large_value_1));
+  ASSERT_OK(Put(3, "three", large_value_2));
+  ASSERT_OK(Flush());
+
+  SyncPoint::GetInstance()->LoadDependency(
+      {{"TitanDBImpl::GetTitanLiveFiles::AfterGetBaseDBLiveFiles",
+        // Drop CF and GC While GetTitanLiveFiles
+        "CheckpointTest::DeleteBlobWhileCheckpointing::DropCF"},
+       {"CheckpointTest::DeleteBlobWhileCheckpointing::WaitGC", 
+        "BlobGCJob::Finish::AfterRewriteValidKeyToLSM"},
+       {"CheckpointTest::DeleteBlobWhileCheckpointing::GCFinish",
+        "TitanDBImpl::GetTitanLiveFiles::BeforeGetTitanDBAllFiles"}});
+  SyncPoint::GetInstance()->EnableProcessing();
+
+  rocksdb::port::Thread t([&]() {
+    Checkpoint* checkpoint;
+    ASSERT_OK(Checkpoint::Create(db_, &checkpoint));
+    ASSERT_OK(checkpoint->CreateCheckpoint(snapshot_name_));
+    delete checkpoint;
+  });
+
+  TEST_SYNC_POINT("CheckpointTest::DeleteBlobWhileCheckpointing::DropCF");
+  DropColumnFamily(2);
+  TEST_SYNC_POINT("CheckpointTest::DeleteBlobWhileCheckpointing::WaitGC");
+  CompactAll();
+  TEST_SYNC_POINT("CheckpointTest::DeleteBlobWhileCheckpointing::GCFinish");
+  t.join();
+  
+  TitanDB* snapshotDB;
+  ReadOptions roptions;
+  std::string result;
+  std::vector<ColumnFamilyHandle*> cphandles;
+  options.create_if_missing = false;
+  std::vector<std::string> cfs;
+  cfs = {kDefaultColumnFamilyName, "one", "two", "three"};
+  std::vector<TitanCFDescriptor> column_families;
+  for (size_t i = 0; i < cfs.size(); ++i) {
+    column_families.push_back(TitanCFDescriptor(cfs[i], options));
+  }
+  ASSERT_OK(TitanDB::Open(options, snapshot_name_, column_families, &cphandles,
+                     &snapshotDB));
+  ASSERT_OK(snapshotDB->Get(roptions, cphandles[0], "Default", &result));
+  ASSERT_EQ("Default", result);
+  ASSERT_OK(snapshotDB->Get(roptions, cphandles[1], "one", &result));
+  ASSERT_EQ("one", result);
+  ASSERT_OK(snapshotDB->Get(roptions, cphandles[2], "two", &result));
+  ASSERT_EQ(large_value_1, result);
+  ASSERT_OK(snapshotDB->Get(roptions, cphandles[3], "three", &result));
+  ASSERT_EQ(large_value_2, result);
+  CompactAll();
+  ASSERT_OK(snapshotDB->Get(roptions, cphandles[2], "two", &result));
+  ASSERT_EQ(large_value_1, result);
+  for (auto h : cphandles) {
+    delete h;
+  }
+  cphandles.clear();
+  delete snapshotDB;
+  snapshotDB = nullptr;
 }
 
 }  // namespace titandb
