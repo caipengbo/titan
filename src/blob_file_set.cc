@@ -334,7 +334,7 @@ void BlobFileSet::GetAllFiles(std::vector<std::string>* files, std::vector<Versi
   
   edits->clear();
   edits->reserve(column_families_.size());
-  
+  bool set_next_file_number = false;
   for (auto& cf : column_families_) {
     VersionEdit edit;
     auto& blob_storage = cf.second;
@@ -342,7 +342,10 @@ void BlobFileSet::GetAllFiles(std::vector<std::string>* files, std::vector<Versi
     blob_storage->GetAllFiles(&all_blob_files);
     // Add all blob files to version_edit
     edit.SetColumnFamilyID(cf.first);
-    edit.SetNextFileNumber(next_file_number_.load());
+    if (!set_next_file_number) {
+      edit.SetNextFileNumber(next_file_number_.load());
+      set_next_file_number = true;
+    }
     for (auto& file : blob_storage->files_) {
       edit.AddBlobFile(file.second);
     }
