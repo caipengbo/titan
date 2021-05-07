@@ -51,9 +51,36 @@ void TitanCheckpointImpl::CleanStagingDirectory(
                  full_private_path.c_str(), s.ToString().c_str());
 }
 
+Status TitanCheckpointImpl::CreateTitanManifest(const std::string& file_name,
+                                                std::vector<VersionEdit>* edits) {
+  Status s;
+  Env* env = db_->GetEnv();
+  bool use_fsync = db_->GetDBOptions().use_fsync;
+  const EnvOptions env_options;
+  std::unique_ptr<WritableFileWriter> file;
+  
+  {
+    std::unique_ptr<WritableFile> f;
+    s = env->NewWritableFile(file_name, &f, env_options);
+    if (!s.ok()) return s;
+    file.reset(new WritableFileWriter(std::move(f), file_name, env_options));
+  }
+  std::unique_ptr<log::Writer> manifest;
+  manifest.reset(new log::Writer(std::move(file), 0, false));
+  
+  for (auto& edit : *edits) {
+    std::string record;
+    edit.EncodeTo(&record);
+    s = manifest->AddRecord(record);
+    if (!s.ok()) return s;
+  }
+  
+  return manifest->file()->Sync(use_fsync);
+}
+
 // Builds an openable checkpoint of TitanDB
 Status TitanCheckpointImpl::CreateCheckpoint(const std::string& checkpoint_dir,
-                                        uint64_t log_size_for_flush) {
+                                             uint64_t log_size_for_flush) {
   DBOptions db_options = db_->GetDBOptions();
   Status s = db_->GetEnv()->FileExists(checkpoint_dir);
   if (s.ok()) {
@@ -307,8 +334,7 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
       if (type == kDescriptorFile) {
         if (in_titan_dir) {
           // Craft titan manifest file, ensure include all titan file.
-          CreateTitanManifest(db_->GetEnv(), db_->GetDBOptions().use_fsync,
-                             full_private_path+src_fname, &version_edits);
+          CreateTitanManifest(full_private_path + src_fname, &version_edits);
         } else {
           s = copy_file_cb(db_->GetName(), src_fname, base_manifest_file_size, type); 
         }

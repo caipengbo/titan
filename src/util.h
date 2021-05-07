@@ -11,8 +11,6 @@
 namespace rocksdb {
 namespace titandb {
 
-class VersionEdit;
-
 // A slice pointed to an owned buffer.
 class OwnedSlice : public Slice {
  public:
@@ -82,10 +80,6 @@ Status SyncTitanManifest(Env* env, TitanStats* stats,
                          const ImmutableDBOptions* db_options,
                          WritableFileWriter* file);
 
-// Create titan manifest file based on the content of VersionEdit
-Status CreateTitanManifest(Env* env, bool use_fsync,
-                         const std::string& file_name,
-                         std::vector<VersionEdit>* edits);
 
 }  // namespace titandb
 }  // namespace rocksdb

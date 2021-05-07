@@ -7,6 +7,8 @@
 namespace rocksdb {
 namespace titandb {
 
+class VersionEdit;
+
 class TitanCheckpointImpl : public Checkpoint {
  public:
   // Creates a Checkpoint object to be used for creating openable snapshots
@@ -43,6 +45,10 @@ class TitanCheckpointImpl : public Checkpoint {
 
  private:
   void CleanStagingDirectory(const std::string& path, Logger* info_log);
+
+  // Create titan manifest file based on the content of VersionEdit
+  Status CreateTitanManifest(const std::string& file_name,
+                          std::vector<VersionEdit>* edits);
 
  private:
   TitanDB* db_;
