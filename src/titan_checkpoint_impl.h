@@ -11,20 +11,20 @@ class VersionEdit;
 
 class TitanCheckpointImpl : public Checkpoint {
  public:
-  // Creates a Checkpoint object to be used for creating openable snapshots
   explicit TitanCheckpointImpl(TitanDB* db) : db_(db) {}
 
-  // Builds an openable snapshot of TitanDB on the same disk, which
-  // accepts an output directory on the same disk, and under the directory
-  // (1) hard-linked SST files pointing to existing live SST files
-  // SST files will be copied if output directory is on a different filesystem
-  // (2) a copied manifest files and other files
-  // The directory should not already exist and will be created by this API.
-  // The directory will be an absolute path
+  // Builds an openable snapshot of Titan on the same disk, which accepts 
+  // an output directory on the same disk, and under the directory
+  // (1) Create base db checkpoint.
+  // (2) Hard linked all existing blob files(live + obsolete) if the output 
+  //     directory is on the same filesystem as the database, and copied otherwise.
+  // (3) Create MANIFEST file include all records about existing blob files.
+  // (4) Craft CURRENT file manually based on MANIFEST file number.
+  // This will include redundant blob files, but hopefully not a lot of them, and on 
+  // restart Titan will recalculate GC stats and GC out those redundant blob files.
   using Checkpoint::CreateCheckpoint;
   virtual Status CreateCheckpoint(const std::string& checkpoint_dir,
                                   uint64_t log_size_for_flush) override;
-
 
   // Checkpoint logic can be customized by providing callbacks for link, copy,
   // or create.

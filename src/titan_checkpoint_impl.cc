@@ -8,6 +8,7 @@
 #include "port/port.h"
 #include "rocksdb/transaction_log.h"
 #include "test_util/sync_point.h"
+#include "utilities/checkpoint/checkpoint_impl.h"
 
 namespace rocksdb {
 namespace titandb {
@@ -194,195 +195,78 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
         uint64_t* sequence_number, uint64_t log_size_for_flush,
         const std::string full_private_path) {
   Status s;
-  std::vector<std::string> live_files;
-  std::vector<std::string> titan_live_files;
+  std::vector<std::string> titandb_files;
   std::vector<VersionEdit> version_edits;
-  uint64_t base_manifest_file_size = 0;
-  uint64_t min_log_num = port::kMaxUint64;
-  *sequence_number = db_->GetLatestSequenceNumber();
   bool same_fs = true;
-  VectorLogPtr live_wal_files;
 
-  bool flush_memtable = true;
-  if (!db_options.allow_2pc) {
-    if (log_size_for_flush == port::kMaxUint64) {
-      flush_memtable = false;
-    } else if (log_size_for_flush > 0) {
-      // if out standing log files are small, we skip the flush.
-      s = db_->GetSortedWalFiles(live_wal_files);
-
-      if (!s.ok()) {
-        return s;
-      }
-
-      // Don't flush column families if total log size is smaller than
-      // log_size_for_flush. We copy the log files instead.
-      // We may be able to cover 2PC case too.
-      uint64_t total_wal_size = 0;
-      for (auto& wal : live_wal_files) {
-        total_wal_size += wal->SizeFileBytes();
-      }
-      if (total_wal_size < log_size_for_flush) {
-        flush_memtable = false;
-      }
-      live_wal_files.clear();
-    }
-  }
-
-  // This will return live files prefixed with "/"
-  s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
-                              &version_edits, flush_memtable);
+  // Create base db checkpoint
+  auto base_db_checkpoint = new rocksdb::CheckpointImpl(db_);
+  s = base_db_checkpoint->CreateCustomCheckpoint(db_options, link_file_cb, 
+                                                 copy_file_cb, create_file_cb, 
+                                                 sequence_number, log_size_for_flush);
+  delete base_db_checkpoint;
+  base_db_checkpoint = nullptr;
   
-  if (s.ok() && db_options.allow_2pc) {
-    // If 2PC is enabled, we need to get minimum log number after the flush.
-    // Need to refetch the live files to recapture the checkpoint.
-    if (!db_->GetIntProperty(DB::Properties::kMinLogNumberToKeep,
-                              &min_log_num)) {
-      return Status::InvalidArgument(
-              "2PC enabled but cannot fine the min log number to keep.");
-    }
-    // GetTitanLiveFiles() calls the rocksdb::DB::GetLiveFiles() internally.
-    // We need to refetch live files with flush to handle this case:
-    // A previous 000001.log contains the prepare record of transaction tnx1.
-    // The current log file is 000002.log, and sequence_number points to this
-    // file.
-    // After calling rocksdb::DB::GetLiveFiles(), 000003.log is created.
-    // Then tnx1 is committed. The commit record is written to 000003.log.
-    // Now we fetch min_log_num, which will be 3.
-    // Then only 000002.log and 000003.log will be copied, and 000001.log will
-    // be skipped. 000003.log contains commit message of tnx1, but we don't
-    // have respective prepare record for it.
-    // In order to avoid this situation, we need to force flush to make sure
-    // all transactions committed before getting min_log_num will be flushed
-    // to SST files.
-    // We cannot get min_log_num before calling the rocksdb::DB::GetLiveFiles()
-    // for the first time, because if we do that, all the logs files will be
-    // included, far more than needed.
-    s = db_->GetTitanLiveFiles(live_files, &base_manifest_file_size,
-                              &version_edits, flush_memtable);
-  }
-
-  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles1");
-  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles2");
-  db_->FlushWAL(false /* sync */);
-  
-  // if we have more than one column family, we need to also get WAL files
-  if (s.ok()) {
-    s = db_->GetSortedWalFiles(live_wal_files);
-  }
   if (!s.ok()) {
     return s;
   }
+  
+  // This will return files prefixed with "/titandb"
+  s = db_->GetAllTitanFiles(titandb_files, &version_edits);
 
-  size_t wal_size = live_wal_files.size();
+  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCustomCheckpoint::AfterGetAllTitanFiles");
+  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCustomCheckpoint:BeforeTitanDBCheckpoint1");
+  TEST_SYNC_POINT("TitanCheckpointImpl::CreateCustomCheckpoint::BeforeTitanDBCheckpoint2");
 
-  // copy/hard link live_files
-  std::string base_manifest_fname, base_current_fname;
-  std::string titan_manifest_fname, titan_current_fname;
-  for (size_t i = 0; s.ok() && i < live_files.size(); ++i) {
+  // copy/hard link files
+  std::string manifest_fname, current_fname;
+  for (size_t i = 0; s.ok() && i < titandb_files.size(); ++i) {
     uint64_t number;
     FileType type;
-    bool ok, in_titan_dir = false;
-    // the filename prefix is '/titandb'
-    if (live_files[i].rfind("/titandb", 0) == 0) {
-      in_titan_dir = true;
-      ok = ParseFileName(live_files[i].substr(8), &number, &type);
-    } else {
-      ok = ParseFileName(live_files[i], &number, &type);
-    }
+    // We should
+    bool ok = ParseFileName(titandb_files[i].substr(8), &number, &type);
 
     if (!ok) {
       s = Status::Corruption("Can't parse file name. This is very bad");
       break;
     }
-    // we should only get sst, blob, options, manifest and current files here
-    assert(type == kTableFile || type == kBlobFile || type == kDescriptorFile ||
-           type == kCurrentFile || type == kOptionsFile);
-    assert(live_files[i].size() > 0 && live_files[i][0] == '/');
+
+    // we should only get blob, manifest and current files here
+    assert(type == kBlobFile || type == kDescriptorFile || type == kCurrentFile);
+    assert(titandb_files[i].size() > 8 && titandb_files[i].substr(0, 8) == "/titandb");
     if (type == kCurrentFile) {
-      // We will craft the current file manually to ensure it's consistent with
-      // the manifest number. This is necessary because current's file contents
-      // can change during checkpoint creation.
-      if (in_titan_dir) {
-        titan_current_fname = live_files[i];
-      } else {
-        base_current_fname = live_files[i];
-      }
+      current_fname = titandb_files[i];
       continue;
     } else if (type == kDescriptorFile) {
-      if (in_titan_dir) {
-        titan_manifest_fname = live_files[i];
-      } else {
-        base_manifest_fname = live_files[i];
-      }
+      manifest_fname = titandb_files[i];
     }
-    std::string src_fname = live_files[i];
+    std::string src_fname = titandb_files[i];
 
     // Rules:
-    // * If it's kTableFile/kBlobFile, then it's shared
-    // * If it's kDescriptorFile of base db, limit the size to base_manifest_file_size
+    // * If it's kBlobFile, then it's shared
     // * If it's kDescriptorFile of titandb, craft the manifest based on all blob file
+    // * If it's kCurrentFile, craft the current file manually to ensure it's consistent 
+    //   with the manifest number. This is necessary because current's file contents can 
+    //   change during checkpoint creation.
     // * Always copy if cross-device link
-    if ((type == kTableFile || type == kBlobFile) && same_fs) {
+    if (type == kBlobFile && same_fs) {
       s = link_file_cb(db_->GetName(), src_fname, type);
       if (s.IsNotSupported()) {
         same_fs = false;
         s = Status::OK();
       }
     }
-    if ((type != kTableFile && type != kBlobFile) || (!same_fs)) {
+    if (type != kBlobFile || !same_fs) {
       if (type == kDescriptorFile) {
-        if (in_titan_dir) {
-          // Craft titan manifest file, ensure include all titan file.
-          CreateTitanManifest(full_private_path + src_fname, &version_edits);
-        } else {
-          s = copy_file_cb(db_->GetName(), src_fname, base_manifest_file_size, type); 
-        }
+        s = CreateTitanManifest(full_private_path + src_fname, &version_edits);
       } else {
         s = copy_file_cb(db_->GetName(), src_fname, 0, type);        
       }
     }
-    
   }
   // Write manifest name to CURRENT file
-  if (s.ok() && !base_current_fname.empty() && !base_manifest_fname.empty()) {
-    create_file_cb(base_current_fname, base_manifest_fname.substr(1) + "\n",
-                   kCurrentFile);
-  }
-  if (s.ok() && !titan_current_fname.empty() && !titan_manifest_fname.empty()) {
-    create_file_cb(titan_current_fname, titan_manifest_fname.substr(9) + "\n",
-                   kCurrentFile);
-  }
-
-  ROCKS_LOG_INFO(db_options.info_log, "Number of log files %" ROCKSDB_PRIszt,
-                 live_wal_files.size());
-
-  // Link WAL files. Copy exact size of last one because it is the only one
-  // that has changes after the last flush.
-  for (size_t i = 0; s.ok() && i < wal_size; ++i) {
-    if ((live_wal_files[i]->Type() == kAliveLogFile) &&
-        (!flush_memtable ||
-         live_wal_files[i]->StartSequence() >= *sequence_number ||
-         live_wal_files[i]->LogNumber() >= min_log_num)) {
-      if (i + 1 == wal_size) {
-        s = copy_file_cb(db_options.wal_dir, live_wal_files[i]->PathName(),
-                         live_wal_files[i]->SizeFileBytes(), kLogFile);
-        break;
-      }
-      if (same_fs) {
-        // we only care about live log files
-        s = link_file_cb(db_options.wal_dir, live_wal_files[i]->PathName(),
-                         kLogFile);
-        if (s.IsNotSupported()) {
-          same_fs = false;
-          s = Status::OK();
-        }
-      }
-      if (!same_fs) {
-        s = copy_file_cb(db_options.wal_dir, live_wal_files[i]->PathName(), 0,
-                         kLogFile);
-      }
-    }
+  if (s.ok() && !current_fname.empty() && !manifest_fname.empty()) {
+    create_file_cb(current_fname, manifest_fname.substr(9) + "\n", kCurrentFile);
   }
 
   return s;

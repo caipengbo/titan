@@ -455,17 +455,12 @@ TEST_F(CheckpointTest, CurrentFileModifiedWhileCheckpointing) {
   Reopen(options);
 
   rocksdb::SyncPoint::GetInstance()->LoadDependency(
-      {// Get past the flush in the checkpoint thread before adding any keys to
-       // the db so the checkpoint thread won't hit the WriteManifest
-       // syncpoints.
-       {"DBImpl::GetLiveFiles:1",
+      {{"TitanCheckpointImpl::CreateCustomCheckpoint::AfterGetAllTitanFiles",
         "CheckpointTest::CurrentFileModifiedWhileCheckpointing:PrePut"},
-       // Roll the manifest during checkpointing right after live files are
-       // snapshotted.
-       {"TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles1",
+       {"TitanCheckpointImpl::CreateCustomCheckpoint:BeforeTitanDBCheckpoint1",
         "VersionSet::LogAndApply:WriteManifest"},
        {"VersionSet::LogAndApply:WriteManifestDone",
-        "TitanCheckpointImpl::CreateCheckpoint:SavedLiveFiles2"}});
+        "TitanCheckpointImpl::CreateCustomCheckpoint::BeforeTitanDBCheckpoint2"}});
   rocksdb::SyncPoint::GetInstance()->EnableProcessing();
 
   rocksdb::port::Thread t([&]() {
@@ -563,15 +558,15 @@ TEST_F(CheckpointTest, GCWhileCheckpointing) {
   ASSERT_OK(Put(2, "two", large_value_1));
   ASSERT_OK(Put(3, "three", large_value_2));
   ASSERT_OK(Flush());
-
+  
   SyncPoint::GetInstance()->LoadDependency(
-      {{"TitanDBImpl::GetTitanLiveFiles::AfterGetBaseDBLiveFiles",
-        // Drop CF and GC While GetTitanLiveFiles
+      {{"TitanCheckpointImpl::CreateCustomCheckpoint::AfterGetAllTitanFiles",
+        // Drop CF and GC after created base db checkpoint
         "CheckpointTest::DeleteBlobWhileCheckpointing::DropCF"},
        {"CheckpointTest::DeleteBlobWhileCheckpointing::WaitGC", 
         "BlobGCJob::Finish::AfterRewriteValidKeyToLSM"},
        {"CheckpointTest::DeleteBlobWhileCheckpointing::GCFinish",
-        "TitanDBImpl::GetTitanLiveFiles::BeforeGetTitanDBAllFiles"}});
+        "TitanCheckpointImpl::CreateCustomCheckpoint::BeforeTitanDBCheckpoint1"}});
   SyncPoint::GetInstance()->EnableProcessing();
 
   rocksdb::port::Thread t([&]() {

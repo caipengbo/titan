@@ -119,16 +119,12 @@ class TitanDB : public StackableDB {
   Status EnableFileDeletions(bool /*force*/) override {
     return Status::NotSupported("TitanDB doesn't support this operation");
   }
-
-  // Get TitanDB live files based on rocksdb::DB::GetLiveFiles 
+  
+  // Get all files in /titandb directory after disable file deletions
   // 
-  // files include the live files of base db and all titandb files
-  // base_manifest_file_size are derived from rocksdb::DB::GetLiveFiles
-  // edits include all blob file record of ervery column family
-  virtual Status GetTitanLiveFiles(std::vector<std::string>& /*files*/,
-                              uint64_t* /*base_manifest_file_size*/,
-                              std::vector<VersionEdit>* /*edits*/,
-                              bool /*flush_memtable*/) {
+  // edits include all blob file records of every column family
+  virtual Status GetAllTitanFiles(std::vector<std::string>& /*files*/,
+                                  std::vector<VersionEdit>* /*edits*/) {
     return Status::NotSupported("TitanDB doesn't support this operation");
   }
                               

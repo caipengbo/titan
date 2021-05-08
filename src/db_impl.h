@@ -116,11 +116,9 @@ class TitanDBImpl : public TitanDB {
   using TitanDB::EnableFileDeletions;
   Status EnableFileDeletions(bool force) override;
 
-  using TitanDB::GetTitanLiveFiles;
-  Status GetTitanLiveFiles(std::vector<std::string>& files,
-                              uint64_t* base_manifest_file_size,
-                              std::vector<VersionEdit>* edits,
-                              bool flush_memtable = true) override;
+  using TitanDB::GetAllTitanFiles;
+  Status GetAllTitanFiles(std::vector<std::string>& files,
+                          std::vector<VersionEdit>* edits) override;
 
   Status DeleteFilesInRanges(ColumnFamilyHandle* column_family,
                              const RangePtr* ranges, size_t n,
