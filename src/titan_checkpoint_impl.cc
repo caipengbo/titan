@@ -210,21 +210,29 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
   delete base_db_checkpoint;
   base_db_checkpoint = nullptr;
   
-  if (disabled_file_deletions) {
-    Status ss = db_->EnableFileDeletions(false);
-    assert(ss.ok());
-  }
-  
   if (!s.ok()) {
+    if (disabled_file_deletions) { 
+      Status ss = db_->EnableFileDeletions(false);
+      assert(ss.ok());
+    }
     return s;
   }
   
   // This will return files prefixed with "/titandb"
   s = db_->GetAllTitanFiles(titandb_files, &version_edits);
 
+  if (disabled_file_deletions) {
+    Status ss = db_->EnableFileDeletions(false);
+    assert(ss.ok());
+  }
+
   TEST_SYNC_POINT("TitanCheckpointImpl::CreateCustomCheckpoint::AfterGetAllTitanFiles");
   TEST_SYNC_POINT("TitanCheckpointImpl::CreateCustomCheckpoint:BeforeTitanDBCheckpoint1");
   TEST_SYNC_POINT("TitanCheckpointImpl::CreateCustomCheckpoint::BeforeTitanDBCheckpoint2");
+
+  if (!s.ok()) {
+    return s;
+  }
 
   // copy/hard link files
   std::string manifest_fname, current_fname;
