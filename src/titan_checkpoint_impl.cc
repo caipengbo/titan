@@ -200,12 +200,20 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
   bool same_fs = true;
 
   // Create base db checkpoint
+  s = db_->DisableFileDeletions();
+  const bool disabled_file_deletions = s.ok();
+
   auto base_db_checkpoint = new rocksdb::CheckpointImpl(db_);
   s = base_db_checkpoint->CreateCustomCheckpoint(db_options, link_file_cb, 
                                                  copy_file_cb, create_file_cb, 
                                                  sequence_number, log_size_for_flush);
   delete base_db_checkpoint;
   base_db_checkpoint = nullptr;
+  
+  if (disabled_file_deletions) {
+    Status ss = db_->EnableFileDeletions(false);
+    assert(ss.ok());
+  }
   
   if (!s.ok()) {
     return s;
