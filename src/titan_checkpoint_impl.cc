@@ -234,12 +234,12 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
     return s;
   }
 
-  // copy/hard link files
+  // Copy/Hard link files
   std::string manifest_fname, current_fname;
   for (size_t i = 0; s.ok() && i < titandb_files.size(); ++i) {
     uint64_t number;
     FileType type;
-    // We should
+    // Should remove '/titandb' prefix
     bool ok = ParseFileName(titandb_files[i].substr(8), &number, &type);
 
     if (!ok) {
@@ -247,7 +247,7 @@ Status TitanCheckpointImpl::CreateCustomCheckpoint(
       break;
     }
 
-    // we should only get blob, manifest and current files here
+    // We should only get blob, manifest and current files here
     assert(type == kBlobFile || type == kDescriptorFile || type == kCurrentFile);
     assert(titandb_files[i].size() > 8 && titandb_files[i].substr(0, 8) == "/titandb");
     if (type == kCurrentFile) {
